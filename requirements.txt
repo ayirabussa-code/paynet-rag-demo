@@ -1,6 +1,6 @@
 pip>=23.2
 streamlit==1.30.0
-langchain==0.1.223
-openai==0.28.0
-chromadb==0.3.24
-python-docx==0.8.12
+langchain>=0.1.0,<1.0.0   # pick latest in 0.x series, e.g., 0.1.39
+openai>=0.28.0
+chromadb>=0.3.24
+python-docx>=0.8.12
