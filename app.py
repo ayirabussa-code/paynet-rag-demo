@@ -5,6 +5,8 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain.llms import OpenAI
+from langchain.embeddings import OpenAIEmbeddings
+
 
 CHUNK_FOLDER = "rag_docs"
 EMBEDDINGS_MODEL = OpenAIEmbeddings()
