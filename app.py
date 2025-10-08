@@ -1,94 +1,90 @@
 import streamlit as st
-import openai
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.document_loaders import Docx2txtLoader
+import tempfile
 import os
-from docx import Document
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import TfidfVectorizer
+from openai import OpenAI, OpenAIError
 
-# -------------------------
-# Streamlit UI
-# -------------------------
-st.title("📘 Smart RAG App with Version Control (v1/v2 Priority)")
+st.set_page_config(page_title="RAG Demo - Latest Answer", layout="wide")
+st.title("📄 RAG Demo - Latest Answer from DOCX Files")
 
-# Step 1: API Key Input
-api_key = st.text_input("🔑 Enter your OpenAI API Key:", type="password")
+# 1️⃣ Ask user for OpenAI API key
+api_key = st.text_input(
+    "Enter your OpenAI API Key",
+    type="password",
+    placeholder="sk-...",
+)
+if not api_key:
+    st.warning("Please enter your OpenAI API key to continue.")
+    st.stop()
 
-if api_key:
-    openai.api_key = api_key
+# 2️⃣ Upload .docx files
+uploaded_files = st.file_uploader(
+    "Upload one or more DOCX files (e.g., v1, v2)", 
+    type=["docx"], 
+    accept_multiple_files=True
+)
+if not uploaded_files:
+    st.info("Please upload at least one DOCX file.")
+    st.stop()
 
-    # Step 2: File Upload
-    uploaded_files = st.file_uploader("📂 Upload one or more DOCX files", type=["docx"], accept_multiple_files=True)
+# 3️⃣ Load documents
+docs = []
+for uploaded_file in uploaded_files:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        loader = Docx2txtLoader(tmp_file.name)
+        docs.extend(loader.load())
+    os.unlink(tmp_file.name)  # delete temp file
 
-    if uploaded_files:
-        # Step 3: Process uploaded documents
-        docs_text = {}
-        for file in uploaded_files:
-            doc = Document(file)
-            full_text = " ".join([p.text for p in doc.paragraphs])
-            docs_text[file.name] = full_text
+# 4️⃣ Split documents into chunks
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+split_docs = text_splitter.split_documents(docs)
 
-        st.success(f"✅ Loaded {len(uploaded_files)} documents successfully!")
+# 5️⃣ Create embeddings and vectorstore
+try:
+    embeddings = OpenAIEmbeddings(openai_api_key=api_key)
+    vectordb = Chroma.from_documents(split_docs, embeddings)
+except OpenAIError as e:
+    st.error(f"OpenAI API error: {e}")
+    st.stop()
 
-        # Step 4: Question input
-        query = st.text_input("💬 Ask a question about your documents:")
+st.success("✅ Documents processed and vectorstore created successfully!")
 
-        if query:
-            # Step 5: Chunk and index all documents
-            all_chunks = []
-            doc_mapping = []
-            for doc_name, text in docs_text.items():
-                chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
-                all_chunks.extend(chunks)
-                doc_mapping.extend([doc_name] * len(chunks))
+# 6️⃣ Ask a query and retrieve the **single most relevant answer**
+query = st.text_input("Ask a question about your documents:")
+if query:
+    try:
+        # Retrieve top 3 chunks
+        results = vectordb.similarity_search(query, k=3)
 
-            # Step 6: Compute embeddings via TF-IDF
-            vectorizer = TfidfVectorizer(stop_words="english")
-            doc_vectors = vectorizer.fit_transform(all_chunks)
-            query_vector = vectorizer.transform([query])
+        if not results:
+            st.info("No relevant content found in uploaded documents.")
+        else:
+            # Combine retrieved chunks for latest info
+            combined_text = "\n\n".join(
+                [f"(from {getattr(doc, 'metadata', {}).get('source', 'unknown file')}): {doc.page_content}" 
+                 for doc in results]
+            )
 
-            # Step 7: Find the top matching chunk
-            similarities = cosine_similarity(query_vector, doc_vectors).flatten()
-            top_index = similarities.argmax()
-            top_chunk = all_chunks[top_index]
-            source_doc = doc_mapping[top_index]
+            # Generate final answer using new OpenAI v1 API
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant summarizing the latest information."},
+                    {"role": "user", "content": f"Answer the question using the latest info only:\n\nDocuments:\n{combined_text}\n\nQuestion: {query}"}
+                ],
+                temperature=0
+            )
 
-            # Step 8: If multiple versions exist (e.g., v1 and v2), prefer the latest one
-            doc_names = list(docs_text.keys())
-            if len(doc_names) > 1:
-                # Sort by version number (v2 > v1)
-                latest_doc = sorted(doc_names, key=lambda x: int(''.join(filter(str.isdigit, x.split('_v')[-1].split('.')[0])) or 0))[-1]
-                if latest_doc != source_doc:
-                    # Replace with latest document chunk if similar content exists
-                    for idx, name in enumerate(doc_mapping):
-                        if name == latest_doc:
-                            if cosine_similarity(doc_vectors[top_index], doc_vectors[idx])[0][0] > 0.85:
-                                source_doc = latest_doc
-                                top_chunk = all_chunks[idx]
-                                break
+            answer = response.choices[0].message.content
+            st.markdown("**Answer (latest info):**")
+            st.write(answer)
 
-            # Step 9: Generate a concise final answer from LLM
-            try:
-                prompt = f"""
-                You are an expert summarizer for RAG systems.
-                Based on the document content below, answer the user's question in a single, clean paragraph.
-                
-                User's question: {query}
-                Document source: {source_doc}
-                Relevant text: {top_chunk}
-                """
-
-                response = openai.ChatCompletion.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=250,
-                    temperature=0.2
-                )
-
-                answer = response.choices[0].message["content"].strip()
-                st.markdown(f"### 🧠 Answer (from {source_doc}):")
-                st.write(answer)
-
-            except Exception as e:
-                st.error(f"❌ Error generating answer: {e}")
-else:
-    st.info("Please enter your OpenAI API key to start.")
+    except OpenAIError as e:
+        st.error(f"OpenAI API error: {e}")
+    except Exception as e:
+        st.error(f"Error retrieving results: {e}")
