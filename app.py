@@ -1,70 +1,92 @@
-import streamlit as st
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.docstore.document import Document
+# app.py
 import os
+import streamlit as st
 
-# ---------------------------
-# Streamlit UI
-# ---------------------------
-st.set_page_config(page_title="LangChain + OpenAIEmbeddings", layout="wide")
-st.title("LangChain + OpenAIEmbeddings Demo")
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.chains import RetrievalQA
+from langchain.llms import OpenAI
+from openai.error import RateLimitError
 
-# Get OpenAI API key
-api_key = st.text_input("Enter your OpenAI API key", type="password")
-if not api_key:
-    st.warning("Please enter your OpenAI API key to proceed.")
+# -------------------
+# Set your OpenAI API key
+# -------------------
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    st.error("Please set your OPENAI_API_KEY environment variable.")
     st.stop()
 
-# Initialize embeddings
-embeddings = OpenAIEmbeddings(openai_api_key=api_key)
-
-# ---------------------------
-# File upload
-# ---------------------------
+# -------------------
+# Upload documents
+# -------------------
 uploaded_files = st.file_uploader(
-    "Upload text files (.txt) or Word files (.docx) to create embeddings", 
-    accept_multiple_files=True,
-    type=["txt", "docx"]
+    "Upload your documents (PDF, TXT, DOCX)", accept_multiple_files=True
 )
 
 if uploaded_files:
-    st.success(f"{len(uploaded_files)} file(s) uploaded successfully!")
+    documents = []
+    for uploaded_file in uploaded_files:
+        content = uploaded_file.read().decode("utf-8", errors="ignore")
+        documents.append({"page_content": content, "metadata": {"filename": uploaded_file.name}})
 
-    docs = []
-    for file in uploaded_files:
-        if file.type == "text/plain":
-            content = file.read().decode("utf-8")
-        elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            from docx import Document as DocxDocument
-            docx_file = DocxDocument(file)
-            content = "\n".join([p.text for p in docx_file.paragraphs])
-        else:
-            st.error(f"Unsupported file type: {file.type}")
-            continue
-        
-        docs.append(Document(page_content=content, metadata={"source": file.name}))
-    
-    # Split text into chunks
-    text_splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    split_docs = text_splitter.split_documents(docs)
+    # -------------------
+    # Split documents into chunks
+    # -------------------
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=100
+    )
+    split_docs = text_splitter.split_documents(documents)
 
-    st.info(f"Text split into {len(split_docs)} chunks for embedding.")
+    # -------------------
+    # Initialize embeddings
+    # -------------------
+    try:
+        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    except RateLimitError:
+        st.error("OpenAI API quota exceeded. Cannot generate embeddings at this time.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error initializing embeddings: {e}")
+        st.stop()
 
-    # Create vector store
-    vectordb = Chroma.from_documents(split_docs, embeddings)
+    # -------------------
+    # Vectorstore (with caching)
+    # -------------------
+    vectordb_path = "chroma_db"
+    if os.path.exists(vectordb_path):
+        vectordb = Chroma(persist_directory=vectordb_path, embedding_function=embeddings)
+    else:
+        try:
+            vectordb = Chroma.from_documents(split_docs, embeddings, persist_directory=vectordb_path)
+            vectordb.persist()
+        except RateLimitError:
+            st.error("OpenAI API quota exceeded while creating embeddings.")
+            st.stop()
+        except Exception as e:
+            st.error(f"Error creating vectorstore: {e}")
+            st.stop()
 
-    st.success("Embeddings created and stored in memory.")
+    # -------------------
+    # Retrieval QA
+    # -------------------
+    retriever = vectordb.as_retriever()
+    qa = RetrievalQA.from_chain_type(
+        llm=OpenAI(openai_api_key=OPENAI_API_KEY),
+        retriever=retriever,
+        chain_type="stuff"
+    )
 
-    # ---------------------------
-    # Query interface
-    # ---------------------------
-    query = st.text_input("Enter a query to search the uploaded documents:")
-
-    if query:
-        results = vectordb.similarity_search(query, k=3)
-        st.subheader("Top 3 matching chunks:")
-        for i, doc in enumerate(results, 1):
-            st.write(f"**Result {i}** from `{doc.metadata['source']}`:")
-            st.write(doc.page_content)
+    # -------------------
+    # Ask user questions
+    # -------------------
+    user_question = st.text_input("Ask a question about your documents:")
+    if user_question:
+        try:
+            answer = qa.run(user_question)
+            st.write("Answer:", answer)
+        except RateLimitError:
+            st.error("OpenAI API quota exceeded while generating answer.")
+        except Exception as e:
+            st.error(f"Error generating answer: {e}")
