@@ -1,25 +1,6 @@
-# pip must be recent
-pip>=23.2
-
-# Streamlit
 streamlit==1.30.0
-
-# LangChain with OpenAIEmbeddings
-langchain>=0.1.105,<1.0.0
-
-# OpenAI SDK
-openai>=0.28.0
-
-# Chroma vector store (optional, for embeddings)
-chromadb>=0.3.24
-
-# For handling DOCX files (optional, if you need document parsing)
-python-docx>=0.8.12
-
-# Rich for better logs
-rich>=10.14.0,<14
-
-langchain-community>=0.1.0
-tiktoken>=0.4.0
-
-
+langchain-community==0.3.27
+openai>=2.2.0
+tiktoken
+chromadb
+python-docx
