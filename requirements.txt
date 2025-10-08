@@ -20,5 +20,6 @@ python-docx>=0.8.12
 rich>=10.14.0,<14
 
 langchain-community>=0.1.0
+tiktoken>=0.4.0
 
 
