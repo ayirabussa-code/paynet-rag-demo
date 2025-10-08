@@ -9,7 +9,7 @@ import openai
 from openai import OpenAIError
 
 st.set_page_config(page_title="RAG Demo", layout="wide")
-st.title("📄 RAG Demo with Docx Upload (Latest Info Prioritized)")
+st.title("📄 RAG Demo with Docx Upload (Latest Info)")
 
 # 1️⃣ Ask user for OpenAI API key
 api_key = st.text_input(
@@ -23,56 +23,66 @@ if not api_key:
 
 # 2️⃣ Upload .docx files
 uploaded_files = st.file_uploader(
-    "Upload one or more DOCX files", type=["docx"], accept_multiple_files=True
+    "Upload one or more DOCX files (v1, v2, etc.)",
+    type=["docx"],
+    accept_multiple_files=True
 )
 if not uploaded_files:
     st.info("Please upload at least one DOCX file.")
     st.stop()
 
-# 3️⃣ Load documents with metadata for version
+# 3️⃣ Load documents
 docs = []
 for uploaded_file in uploaded_files:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
         tmp_file.write(uploaded_file.read())
         loader = Docx2txtLoader(tmp_file.name)
-        file_docs = loader.load()
-        # Detect version from filename
-        version = "v1"
-        if "v2" in uploaded_file.name.lower():
-            version = "v2"
-        for doc in file_docs:
+        loaded_docs = loader.load()
+        # Add metadata: source filename
+        for doc in loaded_docs:
             doc.metadata["source"] = uploaded_file.name
-            doc.metadata["version"] = version
-        docs.extend(file_docs)
-    os.unlink(tmp_file.name)
+            # Optional: mark version from filename (v1, v2)
+            if "v2" in uploaded_file.name.lower():
+                doc.metadata["version"] = "v2"
+            else:
+                doc.metadata["version"] = "v1"
+        docs.extend(loaded_docs)
+    os.unlink(tmp_file.name)  # delete temp file
 
 # 4️⃣ Split documents into chunks
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=100
+)
 split_docs = text_splitter.split_documents(docs)
 
-# 5️⃣ Sort chunks by version (v2 first)
-split_docs.sort(key=lambda x: x.metadata.get("version", "v1"), reverse=True)
-
-# 6️⃣ Create embeddings and vectorstore
+# 5️⃣ Create embeddings
 try:
     embeddings = OpenAIEmbeddings(openai_api_key=api_key)
-    vectordb = Chroma.from_documents(split_docs, embeddings)
 except OpenAIError as e:
     st.error(f"OpenAI API error: {e}")
     st.stop()
 
-st.success("✅ Documents processed and vectorstore created successfully!")
+st.success("✅ Documents processed successfully!")
 
-# 7️⃣ Ask a query and retrieve top result from latest version
+# 6️⃣ Ask a query and retrieve top result from latest version
 query = st.text_input("Ask a question about your documents:")
 if query:
     try:
-        results = vectordb.similarity_search(query, k=1)  # only top chunk
+        # Filter latest version first
+        latest_docs = [d for d in split_docs if d.metadata.get("version") == "v2"]
+        if not latest_docs:
+            latest_docs = split_docs  # fallback to all docs
+
+        vectordb_latest = Chroma.from_documents(latest_docs, embeddings)
+        results = vectordb_latest.similarity_search(query, k=1)  # only top chunk
+
         if results:
             doc = results[0]
             st.write(f"**Answer (latest info from {doc.metadata.get('source')}):**")
             st.write(doc.page_content)
         else:
-            st.info("No matching information found in your documents.")
+            st.info("No matching information found in the latest documents.")
+
     except Exception as e:
         st.error(f"Error retrieving results: {e}")
