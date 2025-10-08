@@ -9,7 +9,7 @@ import openai
 from openai import OpenAIError
 
 st.set_page_config(page_title="RAG Demo", layout="wide")
-st.title("📄 RAG Demo with Docx Upload (Latest Info)")
+st.title("📄 RAG Demo with DOCX Upload (Latest Version Only)")
 
 # 1️⃣ Ask user for OpenAI API key
 api_key = st.text_input(
@@ -23,7 +23,7 @@ if not api_key:
 
 # 2️⃣ Upload .docx files
 uploaded_files = st.file_uploader(
-    "Upload one or more DOCX files (v1, v2, etc.)",
+    "Upload one or more DOCX files (v2 only will be used)",
     type=["docx"],
     accept_multiple_files=True
 )
@@ -34,20 +34,22 @@ if not uploaded_files:
 # 3️⃣ Load documents
 docs = []
 for uploaded_file in uploaded_files:
+    if "v2" not in uploaded_file.name.lower():
+        continue  # ignore non-latest versions
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
         tmp_file.write(uploaded_file.read())
         loader = Docx2txtLoader(tmp_file.name)
         loaded_docs = loader.load()
-        # Add metadata: source filename
         for doc in loaded_docs:
             doc.metadata["source"] = uploaded_file.name
-            # Optional: mark version from filename (v1, v2)
-            if "v2" in uploaded_file.name.lower():
-                doc.metadata["version"] = "v2"
-            else:
-                doc.metadata["version"] = "v1"
+            doc.metadata["version"] = "v2"
         docs.extend(loaded_docs)
     os.unlink(tmp_file.name)  # delete temp file
+
+if not docs:
+    st.warning("No latest version (v2) documents were uploaded. Please upload at least one v2 file.")
+    st.stop()
 
 # 4️⃣ Split documents into chunks
 text_splitter = RecursiveCharacterTextSplitter(
@@ -63,19 +65,14 @@ except OpenAIError as e:
     st.error(f"OpenAI API error: {e}")
     st.stop()
 
-st.success("✅ Documents processed successfully!")
+st.success("✅ Latest version documents processed successfully!")
 
-# 6️⃣ Ask a query and retrieve top result from latest version
-query = st.text_input("Ask a question about your documents:")
+# 6️⃣ Ask a query and retrieve top result
+query = st.text_input("Ask a question about your latest documents (v2):")
 if query:
     try:
-        # Filter latest version first
-        latest_docs = [d for d in split_docs if d.metadata.get("version") == "v2"]
-        if not latest_docs:
-            latest_docs = split_docs  # fallback to all docs
-
-        vectordb_latest = Chroma.from_documents(latest_docs, embeddings)
-        results = vectordb_latest.similarity_search(query, k=1)  # only top chunk
+        vectordb_latest = Chroma.from_documents(split_docs, embeddings)
+        results = vectordb_latest.similarity_search(query, k=1)  # top 1 chunk only
 
         if results:
             doc = results[0]
