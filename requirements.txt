@@ -19,3 +19,6 @@ python-docx>=0.8.12
 # Rich for better logs
 rich>=10.14.0,<14
 
+langchain-community>=0.1.0
+
+
