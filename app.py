@@ -1,74 +1,50 @@
-import os
 import streamlit as st
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain.text_splitter import CharacterTextSplitter
+from docx import Document
 
 # -------------------
-# OpenAI API Key Handling
+# Make sure you have set your OpenAI API key:
+# export OPENAI_API_KEY="your_openai_api_key"
 # -------------------
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-if not OPENAI_API_KEY:
-    st.warning(
-        "OpenAI API key not found. Please enter your key to continue."
-    )
-    OPENAI_API_KEY = st.text_input("OpenAI API Key", type="password")
-    
-if OPENAI_API_KEY:
-    # Save key for session use
-    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+st.title("Docx Upload + LangChain Vector Search Demo")
 
-    # -------------------
-    # Importing LangChain Modules
-    # -------------------
-    from langchain_community.embeddings import OpenAIEmbeddings
-    from langchain_community.vectorstores import Chroma
-    from langchain.text_splitter import CharacterTextSplitter
+# Upload multiple DOCX files
+uploaded_files = st.file_uploader("Upload DOCX files", type=["docx"], accept_multiple_files=True)
 
-    # -------------------
-    # Sample Document Setup
-    # -------------------
-    st.title("LangChain + Chroma Embeddings Demo")
+if uploaded_files:
+    all_texts = []
 
-    sample_docs = [
-        "Hello world! This is a test document.",
-        "LangChain makes working with embeddings easier.",
-        "Streamlit allows you to build web apps in Python quickly."
-    ]
+    # Read text from each uploaded DOCX
+    for uploaded_file in uploaded_files:
+        doc = Document(uploaded_file)
+        text = "\n".join([para.text for para in doc.paragraphs if para.text.strip() != ""])
+        all_texts.append(text)
 
-    st.subheader("Sample Documents")
-    st.write(sample_docs)
+    st.write("Extracted text from uploaded documents:")
+    st.write(all_texts)
 
-    # -------------------
-    # Text Splitting
-    # -------------------
-    text_splitter = CharacterTextSplitter(
-        separator="\n",
-        chunk_size=50,
-        chunk_overlap=5
-    )
-    split_docs = text_splitter.split_documents(sample_docs)
-    st.subheader("Split Documents")
-    st.write(split_docs)
+    # Split text into chunks for embeddings
+    splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    split_docs = []
+    for text in all_texts:
+        split_docs.extend(splitter.split_text(text))
 
-    # -------------------
-    # Create Embeddings & Vector Store
-    # -------------------
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    
-    try:
-        vectordb = Chroma.from_documents(split_docs, embeddings)
-        st.success("Vector store created successfully!")
-    except Exception as e:
-        st.error(f"Error creating vector store: {e}")
+    st.write(f"Total chunks for embedding: {len(split_docs)}")
 
-    # -------------------
-    # Query Example
-    # -------------------
-    query = st.text_input("Enter a query to search embeddings:")
+    # Initialize embeddings
+    embeddings = OpenAIEmbeddings()
 
-    if query and vectordb:
+    # Create vector store from chunks
+    vectordb = Chroma.from_texts(split_docs, embedding=embeddings)
+    st.success("Vector store created successfully!")
+
+    # Query the vector store
+    query = st.text_input("Enter a query to search in uploaded documents:")
+    if query:
         results = vectordb.similarity_search(query)
-        st.subheader("Query Results")
-        st.write(results)
-
-else:
-    st.stop()  # Stop execution until API key is provided
+        st.write("Results:")
+        for i, res in enumerate(results):
+            st.write(f"{i+1}. {res.page_content}")
