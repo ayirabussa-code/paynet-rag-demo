@@ -1,4 +1,3 @@
-
 import streamlit as st
 import os
 from langchain.text_splitter import CharacterTextSplitter
@@ -28,7 +27,7 @@ def build_vector_store(chunks):
     return vector_store
 
 st.title("PayNet API RAG Demo for Technical Writers")
-st.markdown("Ask questions about PayNet API. The system retrieves info from v1 and v2 docs and provides context-aware answers.")
+st.markdown("Ask questions about PayNet API. Retrieves info from v1 and v2 docs.")
 
 chunks = load_chunks(CHUNK_FOLDER)
 vector_store = build_vector_store(chunks)
