@@ -3,7 +3,7 @@ import streamlit as st
 import os
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
+from langchain.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain.llms import OpenAI
 
@@ -24,7 +24,7 @@ def build_vector_store(chunks):
     split_texts = []
     for chunk in chunks:
         split_texts.extend(text_splitter.split_text(chunk))
-    vector_store = FAISS.from_texts(split_texts, EMBEDDINGS_MODEL)
+    vector_store = Chroma.from_texts(split_texts, EMBEDDINGS_MODEL)
     return vector_store
 
 st.title("PayNet API RAG Demo for Technical Writers")
