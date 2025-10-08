@@ -10,7 +10,7 @@ import openai
 
 # -------------------
 # Set your OpenAI API key
-OPENAI_API_KEY = os.getenv("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")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     st.error("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
     st.stop()
