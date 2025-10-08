@@ -3,6 +3,8 @@ from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.document_loaders import Docx2txtLoader
+from langchain.chains import RetrievalQA
+from langchain.chat_models import ChatOpenAI
 import tempfile
 import os
 import openai
@@ -10,7 +12,7 @@ from openai import OpenAIError
 
 st.set_page_config(page_title="RAG Demo", layout="wide")
 
-st.title("📄 RAG Demo with Docx Upload")
+st.title("📄 RAG Demo with Docx Upload + Q&A")
 
 # 1️⃣ Ask user for OpenAI API key
 api_key = st.text_input(
@@ -56,13 +58,28 @@ except OpenAIError as e:
 
 st.success("✅ Documents processed and vectorstore created successfully!")
 
-# 6️⃣ Ask a query and retrieve answers
+# 6️⃣ Ask a query
 query = st.text_input("Ask a question about your documents:")
+
 if query:
     try:
-        results = vectordb.similarity_search(query)
-        st.write("Top matching chunks from documents:")
+        # Retrieval step
+        results = vectordb.similarity_search(query, k=4)
+        st.subheader("Top matching chunks:")
         for i, doc in enumerate(results):
-            st.write(f"**Chunk {i+1}:** {doc.page_content[:500]}...")  # first 500 chars
+            st.markdown(f"**Chunk {i+1}:** {doc.page_content[:400]}...")
+
+        # Generation step
+        llm = ChatOpenAI(openai_api_key=api_key, model="gpt-4o-mini")
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            retriever=vectordb.as_retriever(search_kwargs={"k": 4}),
+            return_source_documents=False
+        )
+
+        st.markdown("### 💬 Final Answer:")
+        answer = qa_chain.run(query)
+        st.write(answer)
+
     except Exception as e:
         st.error(f"Error retrieving results: {e}")
