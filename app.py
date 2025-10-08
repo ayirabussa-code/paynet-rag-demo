@@ -2,60 +2,96 @@ import streamlit as st
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import os
-from io import BytesIO
-from docx import Document
+from langchain.docstore.document import Document
+from docx import Document as DocxDocument
+from openai.error import RateLimitError, AuthenticationError
 
-st.set_page_config(page_title="DOCX RAG Demo", layout="wide")
+# -------------------------
+# Streamlit UI
+# -------------------------
+st.title("DOCX RAG Demo with OpenAI Embeddings")
 
-st.title("RAG Demo with DOCX Upload")
+# Ask for OpenAI API key
+api_key = st.text_input(
+    "Enter your OpenAI API Key:",
+    type="password",
+    help="You can get your API key from https://platform.openai.com/account/api-keys"
+)
 
-# -------------------
-# Step 1: Get OpenAI API key
-# -------------------
-if "OPENAI_API_KEY" not in st.session_state:
-    api_key_input = st.text_input(
-        "Enter your OpenAI API Key", type="password"
-    )
-    if api_key_input:
-        st.session_state["OPENAI_API_KEY"] = api_key_input
-
-# Stop execution if no API key provided
-if "OPENAI_API_KEY" not in st.session_state:
+if not api_key:
     st.warning("Please enter your OpenAI API key to continue.")
     st.stop()
 
-api_key = st.session_state["OPENAI_API_KEY"]
-
-# -------------------
-# Step 2: Upload DOCX files
-# -------------------
+# Upload DOCX files
 uploaded_files = st.file_uploader(
-    "Upload DOCX file(s)", type=["docx"], accept_multiple_files=True
+    "Upload one or more DOCX files",
+    type=["docx"],
+    accept_multiple_files=True
 )
 
-if uploaded_files:
-    all_docs = []
+if not uploaded_files:
+    st.info("Please upload at least one DOCX file to continue.")
+    st.stop()
 
-    for uploaded_file in uploaded_files:
-        # Read DOCX content
-        doc = Document(uploaded_file)
-        full_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-        all_docs.append(full_text)
+# -------------------------
+# Read DOCX content
+# -------------------------
+def read_docx(file):
+    doc = DocxDocument(file)
+    full_text = []
+    for para in doc.paragraphs:
+        if para.text.strip():
+            full_text.append(para.text.strip())
+    return "\n".join(full_text)
 
-    # Split text into smaller chunks for embeddings
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=50
-    )
-    split_docs = text_splitter.create_documents(all_docs)
+all_texts = []
+for file in uploaded_files:
+    text = read_docx(file)
+    all_texts.append(Document(page_content=text, metadata={"filename": file.name}))
 
-    st.write(f"Processed {len(split_docs)} text chunks from {len(uploaded_files)} file(s).")
+# -------------------------
+# Split text into chunks
+# -------------------------
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=50
+)
 
-    # -------------------
-    # Step 3: Generate embeddings and vector store
-    # -------------------
+split_docs = text_splitter.split_documents(all_texts)
+
+st.success(f"Total chunks created: {len(split_docs)}")
+
+# -------------------------
+# Create embeddings and vector store
+# -------------------------
+try:
     embeddings = OpenAIEmbeddings(openai_api_key=api_key)
     vectordb = Chroma.from_documents(split_docs, embeddings)
-
     st.success("Vector store created successfully!")
+except AuthenticationError:
+    st.error("Invalid API key. Please check your key and try again.")
+    st.stop()
+except RateLimitError:
+    st.error(
+        "You have exceeded your OpenAI API quota. "
+        "Please check your plan and billing details or try later."
+    )
+    st.stop()
+except Exception as e:
+    st.error(f"Unexpected error: {e}")
+    st.stop()
+
+# -------------------------
+# Simple search interface
+# -------------------------
+query = st.text_input("Enter your search query:")
+
+if query:
+    results = vectordb.similarity_search(query)
+    if results:
+        st.write("Top results:")
+        for i, doc in enumerate(results[:5]):
+            st.write(f"**Result {i+1}** (from `{doc.metadata.get('filename')}`):")
+            st.write(doc.page_content)
+    else:
+        st.info("No matching results found.")
