@@ -1,68 +1,74 @@
-# app.py
-
-import streamlit as st
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from docx import Document
 import os
-import openai
+import streamlit as st
 
 # -------------------
-# Set your OpenAI API key
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OpenAI API Key Handling
+# -------------------
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
 if not OPENAI_API_KEY:
-    st.error("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
-    st.stop()
+    st.warning(
+        "OpenAI API key not found. Please enter your key to continue."
+    )
+    OPENAI_API_KEY = st.text_input("OpenAI API Key", type="password")
+    
+if OPENAI_API_KEY:
+    # Save key for session use
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
-# -------------------
-# Upload a Word document
-uploaded_file = st.file_uploader("Upload a .docx file", type=["docx"])
+    # -------------------
+    # Importing LangChain Modules
+    # -------------------
+    from langchain_community.embeddings import OpenAIEmbeddings
+    from langchain_community.vectorstores import Chroma
+    from langchain.text_splitter import CharacterTextSplitter
 
-if uploaded_file is not None:
+    # -------------------
+    # Sample Document Setup
+    # -------------------
+    st.title("LangChain + Chroma Embeddings Demo")
+
+    sample_docs = [
+        "Hello world! This is a test document.",
+        "LangChain makes working with embeddings easier.",
+        "Streamlit allows you to build web apps in Python quickly."
+    ]
+
+    st.subheader("Sample Documents")
+    st.write(sample_docs)
+
+    # -------------------
+    # Text Splitting
+    # -------------------
+    text_splitter = CharacterTextSplitter(
+        separator="\n",
+        chunk_size=50,
+        chunk_overlap=5
+    )
+    split_docs = text_splitter.split_documents(sample_docs)
+    st.subheader("Split Documents")
+    st.write(split_docs)
+
+    # -------------------
+    # Create Embeddings & Vector Store
+    # -------------------
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    
     try:
-        # Read the Word document
-        doc = Document(uploaded_file)
-        full_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip() != ""])
-        
-        if not full_text:
-            st.warning("The uploaded document is empty.")
-            st.stop()
-        
-        # Split the text into chunks
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        split_docs = text_splitter.split_text(full_text)
-        
-        st.success(f"Document split into {len(split_docs)} chunks.")
-
-        # Initialize OpenAI embeddings
-        try:
-            embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-        except openai.OpenAIError as e:
-            st.error(f"OpenAI error during embeddings initialization: {e}")
-            st.stop()
-        
-        # Create vector database
-        try:
-            vectordb = Chroma.from_documents(split_docs, embeddings)
-            st.success("Vector database created successfully!")
-        except openai.OpenAIError as e:
-            st.error(f"OpenAI error while creating vector DB: {e}")
-            st.stop()
-        
-        # Simple query input
-        user_query = st.text_input("Ask a question about your document:")
-
-        if user_query:
-            try:
-                docs = vectordb.similarity_search(user_query, k=3)
-                st.subheader("Top matching document chunks:")
-                for i, d in enumerate(docs):
-                    st.markdown(f"**Chunk {i+1}:** {d.page_content}")
-            except openai.OpenAIError as e:
-                st.error(f"OpenAI error during similarity search: {e}")
-            except Exception as e:
-                st.error(f"Unexpected error: {e}")
-
+        vectordb = Chroma.from_documents(split_docs, embeddings)
+        st.success("Vector store created successfully!")
     except Exception as e:
-        st.error(f"Error processing document: {e}")
+        st.error(f"Error creating vector store: {e}")
+
+    # -------------------
+    # Query Example
+    # -------------------
+    query = st.text_input("Enter a query to search embeddings:")
+
+    if query and vectordb:
+        results = vectordb.similarity_search(query)
+        st.subheader("Query Results")
+        st.write(results)
+
+else:
+    st.stop()  # Stop execution until API key is provided
